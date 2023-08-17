@@ -26,6 +26,7 @@ exports.signup = async (req, res) => {
 
         // Check if an account already exists
         const user = await User.findOne({ email: req.body.email })
+        console.log (user)
         // Check if the account exists and the email has been verified
         if (user && user.status === "active") return res.status(400).json({
             status: "error",
