@@ -14,86 +14,77 @@ const validate = require('../utils/validators')
 
 exports.signup = async (req, res) => {
     try {
+        const { firstname, lastname, email, username, password } = req.body;
+
         // Validating request body data
-        const { error, value } = validate.Signup(req.body)
+        const { error } = validate.Signup(req.body);
         if (error) {
-            const errorMessages = error.details.message || error.details.map((detail) => detail.message);
+            const errorMessages = error.details.map(detail => detail.message);
             return res.status(400).json({
                 status: "error",
                 message: errorMessages,
             });
         }
 
-        // Check if an account already exists
-        const user = await User.findOne({ email: req.body.email })
-        console.log (user)
-        // Check if the account exists and the email has been verified
-        if (user && user.status === "active") return res.status(400).json({
-            status: "error",
-            message: "Oops! Account already exists. Please try logging in."
-        })
-
         const now = new Date();
-        const expiry = new Date(now.getTime() + 5 * 60 * 1000)
+        const expiry = new Date(now.getTime() + 5 * 60 * 1000);
 
-        // Check if the account exists and the email has not been verified. Then, resend otp
-        if (user && user.status === "inactive") {
-            const otp = random(6, '123456789')
-            await sendMail(req.body.email, 'Email Address Verification', template.replace('{{otp}}', otp))
+        const existingUser = await User.findOne({ email });
 
-            // Check for the previous OTP and delete it before saving a new one to avoid duplication 
-            const OTP = await Token.findOne({ userId: user._id })
-            OTP && await OTP.deleteOne()
+        if (existingUser) {
+            if (existingUser.status === "active") {
+                return res.status(400).json({
+                    status: "error",
+                    message: "Oops! Account already exists. Please try logging in.",
+                });
+            } else if (existingUser.status === "inactive") {
+                const otp = random(6, '123456789');
+                await Promise.all([
+                    sendMail(email, 'Email Address Verification', template.replace('{{otp}}', otp)),
+                    Token.findOneAndDelete({ userId: existingUser._id }),
+                    new Token({ userId: existingUser._id, token: otp, expiry }).save(),
+                ]);
 
-            await new Token({
-                userId: user._id,
-                token: otp,
-                expiry
-            }).save()
+                return res.status(201).json({
+                    status: "success",
+                    message: "An OTP has been sent to your mail",
+                });
+            }
+        } else {
+            const hashedPass = await bcrypt.hash(password, 10);
+            const newUser = new User({
+                firstname,
+                lastname,
+                email,
+                username,
+                password: hashedPass,
+            });
+
+            const otp = random(6, '123456789');
+            await Promise.all([
+                sendMail(email, 'Email Address Verification', template.replace('{{otp}}', otp)),
+                newUser.save(),
+                new Token({ userId: newUser._id, token: otp, expiry }).save(),
+            ]);
+
+            const userWithoutPassword = { ...newUser._doc };
+            delete userWithoutPassword.password;
 
             return res.status(201).json({
                 status: "success",
-                message: "An OTP has been sent to your mail"
-            })
+                message: "An OTP has been sent to your mail",
+                data: userWithoutPassword,
+            });
         }
-
-        // Continue with User registeration if user doesn't exist
-        const hashedPass = await bcrypt.hash(req.body.password, 10)
-
-        // create user object
-        const newUser = new User({
-            firstname: req.body.firstname,
-            lastname: req.body.lastname,
-            email: req.body.email,
-            username: req.body.username,
-            password: hashedPass
-        })
-
-        // Generate OTP and send to the email address gotten from the req body
-        const otp = random(6, '123456789')
-        await sendMail(req.body.email, 'Email Address Verification', template.replace('{{otp}}', otp))
-
-        const createdUser = await newUser.save()
-
-        const { password, ...others } = createdUser._doc
-
-        await new Token({
-            userId: createdUser._id,
-            token: otp,
-            expiry
-        }).save()
-
-        return res.status(201).json({
-            status: "success",
-            message: "An OTP has been sent to your mail",
-            data: others
-        })
-
     } catch (err) {
-        console.log(err.message)
-        throw new Error(err.message)
+        console.log(err.message);
+        return res.status(500).json({
+            status: "error",
+            message: "An error occurred while processing your request",
+        });
     }
-}
+};
+s
 
 /**
  * @desc Verify OTP
