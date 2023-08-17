@@ -84,7 +84,6 @@ exports.signup = async (req, res) => {
         });
     }
 };
-s
 
 /**
  * @desc Verify OTP
